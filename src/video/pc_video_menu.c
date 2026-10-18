@@ -620,7 +620,7 @@ size_t pc_video_menu_row_value(int row, char *out, size_t cap)
         break;
     case R_BLUR: strcpy(value, s->motion_blur_off ? "OFF" : "ORIGINAL"); break;
     case R_CROSSHAIR:
-        strcpy(value, s->crosshair == PCX_CROSS ? "CROSS" : s->crosshair == PCX_T ? "T-SHAPE" : s->crosshair == PCX_CIRCLE ? "CIRCLE" : "ORIGINAL");
+        strcpy(value, s->crosshair == PCX_CROSS ? "CROSS" : s->crosshair == PCX_T ? "T-SHAPE" : s->crosshair == PCX_CIRCLE ? "CIRCLE" : "OFF");
         break;
     case R_HITMARKERS: strcpy(value, s->hitmarkers ? "ON" : "OFF"); break;
     default: break;
@@ -685,8 +685,8 @@ const char *pc_video_menu_row_help(int row)
     case R_VSYNC: return video_menu_text("Waits for the display to refresh before showing a frame.", "Aguarda a atualização da tela antes de exibir cada quadro.");
     case R_FPS: return video_menu_text("Caps how often the picture is shown.", "Limita a frequência de exibição da imagem.");
     case R_BLUR: return video_menu_text("The game's own camera motion blur.", "Desfoque de movimento original da câmera do jogo.");
-    case R_CROSSHAIR: return video_menu_text("A crosshair around the game's dot that opens as you move and fire. Original keeps the dot alone.",
-                                             "Uma mira em volta do ponto do jogo que se abre ao se mover e atirar. Original mantém só o ponto.");
+    case R_CROSSHAIR: return video_menu_text("A crosshair around the game's dot that opens as you move and fire. Off keeps the dot alone.",
+                                             "Uma mira em volta do ponto do jogo que se abre ao se mover e atirar. Desligado mantém só o ponto.");
     case R_HITMARKERS: return video_menu_text("A mark on the crosshair when a shot of yours kills an enemy.",
                                               "Uma marca na mira quando um tiro seu mata um inimigo.");
     case R_RESET: return video_menu_text("Restores every video setting to its default. Locked settings keep their values.", "Restaura as configurações de vídeo para os valores padrão. Opções fixadas mantêm seus valores.");

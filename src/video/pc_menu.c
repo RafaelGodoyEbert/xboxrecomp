@@ -977,7 +977,7 @@ static void load_doc(int check_changed)
             for (i = 0; i < defaults->npage && d->npage < PCM_PAGES; i++) {
                 const Page *p = &defaults->page[i];
                 if (_stricmp(p->name, "VideoSettings") && _stricmp(p->name, "VideoDisplay") && _stricmp(p->name, "VideoGraphics") &&
-                    _strnicmp(p->name, "Controls", 8) && _stricmp(p->name, "PhotoMode")) continue;
+                    _strnicmp(p->name, "Controls", 8) && _stricmp(p->name, "PhotoMode") && _stricmp(p->name, "GameplaySettings")) continue;
                 for (j = 0; j < d->npage; j++) if (!_stricmp(p->name, d->page[j].name)) break;
                 if (j == d->npage) d->page[d->npage++] = *p;
             }

@@ -47,8 +47,8 @@ void pc_video_defaults(PcVideoSettings *s)
     s->ao_method = PCV_AO_OFF;
     s->ao_quality = PCV_AOQ_HIGH;
     s->reflections = PCV_REFL_HIGH;
-    s->crosshair = 1;
-    s->hitmarkers = 1;
+    s->crosshair = 0;             /* original dot; the added crosshair is opt-in */
+    s->hitmarkers = 0;
 }
 
 static int in_list(const unsigned *list, unsigned count, unsigned v)
@@ -291,7 +291,7 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         k_ao_names[s->ao_method < PCV_AO_COUNT ? s->ao_method : PCV_AO_OFF],
         k_ao_quality_names[s->ao_quality < PCV_AOQ_COUNT ? s->ao_quality : PCV_AOQ_HIGH],
         k_refl_names[s->reflections < PCV_REFL_COUNT ? s->reflections : PCV_REFL_HIGH], s->ray_tracing ? "on" : "off",
-        k_crosshair_names[s->crosshair < CROSSHAIR_COUNT ? s->crosshair : 1], s->hitmarkers ? "on" : "off",
+        k_crosshair_names[s->crosshair < CROSSHAIR_COUNT ? s->crosshair : 0], s->hitmarkers ? "on" : "off",
         s->split_screen ? "on" : "off");
     return n < 0 ? 0 : (size_t)n;
 }
