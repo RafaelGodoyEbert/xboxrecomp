@@ -349,7 +349,7 @@ static int photo_row_named(const char *name)
 static int video_row_named(const char *name)
 {
     static const char *const names[] = { "mode", "window", "internal", "aa", "af", "dof", "sharpen", "ao_method", "ao_quality", "reflections",
-        "ray_tracing", "aspect", "fov", "scale", "filter", "vsync", "fps", "blur", "crosshair", "hitmarkers" };
+        "ray_tracing", "aspect", "fov", "scale", "filter", "vsync", "fps", "blur", "crosshair", "hitmarkers", "optional_secondaries" };
     int i;
     for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) if (!_stricmp(name, names[i])) return i;
     return -1;

@@ -49,6 +49,7 @@ void pc_video_defaults(PcVideoSettings *s)
     s->reflections = PCV_REFL_HIGH;
     s->crosshair = 0;             /* original dot; the added crosshair is opt-in */
     s->hitmarkers = 0;
+    s->optional_secondaries = 0;
 }
 
 static int in_list(const unsigned *list, unsigned count, unsigned v)
@@ -213,6 +214,9 @@ static int apply_key(PcVideoSettings *s, const char *key, const char *value)
     } else if (!_stricmp(key, "hitmarkers")) {
         if (!_stricmp(value, "on")) { s->hitmarkers = 1; return 1; }
         if (!_stricmp(value, "off")) { s->hitmarkers = 0; return 1; }
+    } else if (!_stricmp(key, "optional_secondaries")) {
+        if (!_stricmp(value, "on")) { s->optional_secondaries = 1; return 1; }
+        if (!_stricmp(value, "off")) { s->optional_secondaries = 0; return 1; }
     } else if (!_stricmp(key, "split_screen")) {
         if (!_stricmp(value, "on")) { s->split_screen = 1; return 1; }
         if (!_stricmp(value, "off")) { s->split_screen = 0; return 1; }
@@ -279,6 +283,7 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         "ray_tracing=%s\n"
         "crosshair=%s\n"
         "hitmarkers=%s\n"
+        "optional_secondaries=%s\n"
         "split_screen=%s\n",
         s->internal_height, s->window_width, s->window_height,
         s->borderless ? "borderless" : "windowed",
@@ -292,7 +297,7 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         k_ao_quality_names[s->ao_quality < PCV_AOQ_COUNT ? s->ao_quality : PCV_AOQ_HIGH],
         k_refl_names[s->reflections < PCV_REFL_COUNT ? s->reflections : PCV_REFL_HIGH], s->ray_tracing ? "on" : "off",
         k_crosshair_names[s->crosshair < CROSSHAIR_COUNT ? s->crosshair : 0], s->hitmarkers ? "on" : "off",
-        s->split_screen ? "on" : "off");
+        s->optional_secondaries ? "on" : "off", s->split_screen ? "on" : "off");
     return n < 0 ? 0 : (size_t)n;
 }
 
@@ -408,6 +413,10 @@ static unsigned apply_environment(PcVideoSettings *s)
         lock |= PCV_LOCK_CROSSHAIR; s->crosshair = a >= 0 ? (unsigned)a : 0u;
     }
     if ((t = env_text("RECOMP_HITMARKERS")) != NULL) { lock |= PCV_LOCK_HITMARKERS; s->hitmarkers = strcmp(t, "0") && _stricmp(t, "off"); }
+    if ((t = env_text("RECOMP_OPTIONAL_SECONDARIES")) != NULL) {
+        lock |= PCV_LOCK_OPTIONAL_SECONDARIES;
+        s->optional_secondaries = !strcmp(t, "1") || !_stricmp(t, "on");
+    }
     if ((t = env_text("RECOMP_SPLITSCREEN")) != NULL) { lock |= PCV_LOCK_SPLIT; s->split_screen = strcmp(t, "0") && _stricmp(t, "off"); }
     if ((t = env_text("RECOMP_INTERNAL_HEIGHT")) != NULL && parse_uint(t, 1, 100000, &u) &&
         in_list(pc_video_internal_heights, pc_video_internal_height_count, u)) {
@@ -554,7 +563,7 @@ static int valid_settings(const PcVideoSettings *s)
            s->aspect < PCV_ASPECT_COUNT && valid_fov(s->fov) && s->aa < PCV_AA_COUNT &&
            in_list(pc_video_af_levels, pc_video_af_level_count, s->af) && s->dof < PCV_STEP_COUNT && s->sharpen < PCV_STEP_COUNT &&
            s->ao_method < PCV_AO_COUNT && s->ao_quality < PCV_AOQ_COUNT && s->reflections < PCV_REFL_COUNT && s->ray_tracing <= 1 &&
-           s->crosshair < CROSSHAIR_COUNT && s->hitmarkers <= 1 && s->split_screen <= 1;
+           s->crosshair < CROSSHAIR_COUNT && s->hitmarkers <= 1 && s->optional_secondaries <= 1 && s->split_screen <= 1;
 }
 
 /* The new values over the current ones, except where the environment holds a field. */
@@ -582,6 +591,7 @@ static PcVideoSettings merge_unlocked(const PcVideoSettings *base, const PcVideo
     if (locked & PCV_LOCK_RAY_TRACING) r.ray_tracing = base->ray_tracing;
     if (locked & PCV_LOCK_CROSSHAIR) r.crosshair = base->crosshair;
     if (locked & PCV_LOCK_HITMARKERS) r.hitmarkers = base->hitmarkers;
+    if (locked & PCV_LOCK_OPTIONAL_SECONDARIES) r.optional_secondaries = base->optional_secondaries;
     if (locked & PCV_LOCK_SPLIT) r.split_screen = base->split_screen;
     return r;
 }

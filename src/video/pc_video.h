@@ -70,6 +70,7 @@ typedef struct PcVideoSettings {
     unsigned ray_tracing;                     /* 1 = ray-traced effects (experimental), see pc_video_rt_support */
     unsigned crosshair;                       /* PCX_* (pc_crosshair.h): ORIGINAL is the game's own dot alone */
     unsigned hitmarkers;                      /* 1 = a marker when the player kills (pc_crosshair.h) */
+    unsigned optional_secondaries;             /* 1 = mission completion only requires primary objectives */
     unsigned split_screen;                    /* 1 = split-screen, player two in the bottom half (pc_split.h) */
     unsigned render_override_w, render_override_h; /* both non-zero: an explicit raster size (RECOMP_RENDER_*) */
 } PcVideoSettings;
@@ -82,7 +83,7 @@ enum {
     PCV_LOCK_AA = 1u << 10, PCV_LOCK_AF = 1u << 11, PCV_LOCK_DOF = 1u << 12, PCV_LOCK_SHARPEN = 1u << 13,
     PCV_LOCK_AO_METHOD = 1u << 14, PCV_LOCK_AO_QUALITY = 1u << 15, PCV_LOCK_REFLECTIONS = 1u << 16,
     PCV_LOCK_RAY_TRACING = 1u << 17, PCV_LOCK_CROSSHAIR = 1u << 18, PCV_LOCK_HITMARKERS = 1u << 19,
-    PCV_LOCK_SPLIT = 1u << 20
+    PCV_LOCK_SPLIT = 1u << 20, PCV_LOCK_OPTIONAL_SECONDARIES = 1u << 21
 };
 
 extern const unsigned pc_video_internal_heights[];   /* 480 .. 2160 */
