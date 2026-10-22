@@ -15,6 +15,12 @@ const unsigned pc_video_fps_limits[] = { 0, 30, 60, 120, 144, 165, 240 };
 const unsigned pc_video_fps_limit_count = 7;
 const unsigned pc_video_af_levels[] = { 1, 2, 4, 8, 16 };
 const unsigned pc_video_af_level_count = 5;
+const unsigned pc_video_lod_distances[] = { 100, 200, 300, 500, 800, 1000 };
+const unsigned pc_video_lod_distance_count = 6;
+const unsigned pc_video_bullet_damages[] = { 50, 100, 150, 200, 300, 400, 600, 1000 };
+const unsigned pc_video_bullet_damage_count = 8;
+const unsigned pc_video_enemy_healths[] = { 25, 50, 75, 100, 150, 200, 300, 400 };
+const unsigned pc_video_enemy_health_count = 8;
 
 #define PCV_MAX_PIXELS 16777216u
 
@@ -50,6 +56,7 @@ void pc_video_defaults(PcVideoSettings *s)
     s->crosshair = 0;             /* original dot; the added crosshair is opt-in */
     s->hitmarkers = 0;
     s->optional_secondaries = 0;
+    s->lod_distance = s->bullet_damage = s->enemy_health = 100;
 }
 
 static int in_list(const unsigned *list, unsigned count, unsigned v)
@@ -217,6 +224,15 @@ static int apply_key(PcVideoSettings *s, const char *key, const char *value)
     } else if (!_stricmp(key, "optional_secondaries")) {
         if (!_stricmp(value, "on")) { s->optional_secondaries = 1; return 1; }
         if (!_stricmp(value, "off")) { s->optional_secondaries = 0; return 1; }
+    } else if (!_stricmp(key, "lod_distance")) {
+        if (parse_uint(value, 100, 1000, &u) && in_list(pc_video_lod_distances, pc_video_lod_distance_count, u)) { s->lod_distance = u; return 1; }
+    } else if (!_stricmp(key, "bullet_damage")) {
+        if (parse_uint(value, 50, 1000, &u) && in_list(pc_video_bullet_damages, pc_video_bullet_damage_count, u)) { s->bullet_damage = u; return 1; }
+    } else if (!_stricmp(key, "enemy_health")) {
+        if (parse_uint(value, 25, 400, &u) && in_list(pc_video_enemy_healths, pc_video_enemy_health_count, u)) { s->enemy_health = u; return 1; }
+    } else if (!_stricmp(key, "headshot_instakill")) {
+        if (!_stricmp(value, "on")) { s->headshot_instakill = 1; return 1; }
+        if (!_stricmp(value, "off")) { s->headshot_instakill = 0; return 1; }
     } else if (!_stricmp(key, "split_screen")) {
         if (!_stricmp(value, "on")) { s->split_screen = 1; return 1; }
         if (!_stricmp(value, "off")) { s->split_screen = 0; return 1; }
@@ -284,6 +300,10 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         "crosshair=%s\n"
         "hitmarkers=%s\n"
         "optional_secondaries=%s\n"
+        "lod_distance=%u\n"
+        "bullet_damage=%u\n"
+        "enemy_health=%u\n"
+        "headshot_instakill=%s\n"
         "split_screen=%s\n",
         s->internal_height, s->window_width, s->window_height,
         s->borderless ? "borderless" : "windowed",
@@ -297,7 +317,8 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         k_ao_quality_names[s->ao_quality < PCV_AOQ_COUNT ? s->ao_quality : PCV_AOQ_HIGH],
         k_refl_names[s->reflections < PCV_REFL_COUNT ? s->reflections : PCV_REFL_HIGH], s->ray_tracing ? "on" : "off",
         k_crosshair_names[s->crosshair < CROSSHAIR_COUNT ? s->crosshair : 0], s->hitmarkers ? "on" : "off",
-        s->optional_secondaries ? "on" : "off", s->split_screen ? "on" : "off");
+        s->optional_secondaries ? "on" : "off", s->lod_distance, s->bullet_damage, s->enemy_health,
+        s->headshot_instakill ? "on" : "off", s->split_screen ? "on" : "off");
     return n < 0 ? 0 : (size_t)n;
 }
 
@@ -416,6 +437,22 @@ static unsigned apply_environment(PcVideoSettings *s)
     if ((t = env_text("RECOMP_OPTIONAL_SECONDARIES")) != NULL) {
         lock |= PCV_LOCK_OPTIONAL_SECONDARIES;
         s->optional_secondaries = !strcmp(t, "1") || !_stricmp(t, "on");
+    }
+    if ((t = env_text("RECOMP_LOD_DISTANCE")) != NULL) {
+        lock |= PCV_LOCK_LOD_DISTANCE;
+        s->lod_distance = parse_uint(t, 100, 1000, &u) && in_list(pc_video_lod_distances, pc_video_lod_distance_count, u) ? u : 100u;
+    }
+    if ((t = env_text("RECOMP_BULLET_DAMAGE")) != NULL) {
+        lock |= PCV_LOCK_BULLET_DAMAGE;
+        s->bullet_damage = parse_uint(t, 50, 1000, &u) && in_list(pc_video_bullet_damages, pc_video_bullet_damage_count, u) ? u : 100u;
+    }
+    if ((t = env_text("RECOMP_ENEMY_HEALTH")) != NULL) {
+        lock |= PCV_LOCK_ENEMY_HEALTH;
+        s->enemy_health = parse_uint(t, 25, 400, &u) && in_list(pc_video_enemy_healths, pc_video_enemy_health_count, u) ? u : 100u;
+    }
+    if ((t = env_text("RECOMP_HEADSHOT_INSTAKILL")) != NULL) {
+        lock |= PCV_LOCK_HEADSHOT_INSTAKILL;
+        s->headshot_instakill = !strcmp(t, "1") || !_stricmp(t, "on");
     }
     if ((t = env_text("RECOMP_SPLITSCREEN")) != NULL) { lock |= PCV_LOCK_SPLIT; s->split_screen = strcmp(t, "0") && _stricmp(t, "off"); }
     if ((t = env_text("RECOMP_INTERNAL_HEIGHT")) != NULL && parse_uint(t, 1, 100000, &u) &&
@@ -563,7 +600,10 @@ static int valid_settings(const PcVideoSettings *s)
            s->aspect < PCV_ASPECT_COUNT && valid_fov(s->fov) && s->aa < PCV_AA_COUNT &&
            in_list(pc_video_af_levels, pc_video_af_level_count, s->af) && s->dof < PCV_STEP_COUNT && s->sharpen < PCV_STEP_COUNT &&
            s->ao_method < PCV_AO_COUNT && s->ao_quality < PCV_AOQ_COUNT && s->reflections < PCV_REFL_COUNT && s->ray_tracing <= 1 &&
-           s->crosshair < CROSSHAIR_COUNT && s->hitmarkers <= 1 && s->optional_secondaries <= 1 && s->split_screen <= 1;
+           s->crosshair < CROSSHAIR_COUNT && s->hitmarkers <= 1 && s->optional_secondaries <= 1 && s->split_screen <= 1 &&
+           in_list(pc_video_lod_distances, pc_video_lod_distance_count, s->lod_distance) &&
+           in_list(pc_video_bullet_damages, pc_video_bullet_damage_count, s->bullet_damage) &&
+           in_list(pc_video_enemy_healths, pc_video_enemy_health_count, s->enemy_health) && s->headshot_instakill <= 1;
 }
 
 /* The new values over the current ones, except where the environment holds a field. */
@@ -592,6 +632,10 @@ static PcVideoSettings merge_unlocked(const PcVideoSettings *base, const PcVideo
     if (locked & PCV_LOCK_CROSSHAIR) r.crosshair = base->crosshair;
     if (locked & PCV_LOCK_HITMARKERS) r.hitmarkers = base->hitmarkers;
     if (locked & PCV_LOCK_OPTIONAL_SECONDARIES) r.optional_secondaries = base->optional_secondaries;
+    if (locked & PCV_LOCK_LOD_DISTANCE) r.lod_distance = base->lod_distance;
+    if (locked & PCV_LOCK_BULLET_DAMAGE) r.bullet_damage = base->bullet_damage;
+    if (locked & PCV_LOCK_ENEMY_HEALTH) r.enemy_health = base->enemy_health;
+    if (locked & PCV_LOCK_HEADSHOT_INSTAKILL) r.headshot_instakill = base->headshot_instakill;
     if (locked & PCV_LOCK_SPLIT) r.split_screen = base->split_screen;
     return r;
 }

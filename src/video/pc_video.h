@@ -71,6 +71,10 @@ typedef struct PcVideoSettings {
     unsigned crosshair;                       /* PCX_* (pc_crosshair.h): ORIGINAL is the game's own dot alone */
     unsigned hitmarkers;                      /* 1 = a marker when the player kills (pc_crosshair.h) */
     unsigned optional_secondaries;             /* 1 = mission completion only requires primary objectives */
+    unsigned lod_distance;                     /* percentage of native object/geometry LOD distance */
+    unsigned bullet_damage;                    /* percentage of player bullet damage against enemies */
+    unsigned enemy_health;                     /* percentage of enemy health at spawn */
+    unsigned headshot_instakill;                /* 1 = confirmed player headshots kill enemies */
     unsigned split_screen;                    /* 1 = split-screen, player two in the bottom half (pc_split.h) */
     unsigned render_override_w, render_override_h; /* both non-zero: an explicit raster size (RECOMP_RENDER_*) */
 } PcVideoSettings;
@@ -83,7 +87,9 @@ enum {
     PCV_LOCK_AA = 1u << 10, PCV_LOCK_AF = 1u << 11, PCV_LOCK_DOF = 1u << 12, PCV_LOCK_SHARPEN = 1u << 13,
     PCV_LOCK_AO_METHOD = 1u << 14, PCV_LOCK_AO_QUALITY = 1u << 15, PCV_LOCK_REFLECTIONS = 1u << 16,
     PCV_LOCK_RAY_TRACING = 1u << 17, PCV_LOCK_CROSSHAIR = 1u << 18, PCV_LOCK_HITMARKERS = 1u << 19,
-    PCV_LOCK_SPLIT = 1u << 20, PCV_LOCK_OPTIONAL_SECONDARIES = 1u << 21
+    PCV_LOCK_SPLIT = 1u << 20, PCV_LOCK_OPTIONAL_SECONDARIES = 1u << 21,
+    PCV_LOCK_LOD_DISTANCE = 1u << 22, PCV_LOCK_BULLET_DAMAGE = 1u << 23,
+    PCV_LOCK_ENEMY_HEALTH = 1u << 24, PCV_LOCK_HEADSHOT_INSTAKILL = 1u << 25
 };
 
 extern const unsigned pc_video_internal_heights[];   /* 480 .. 2160 */
@@ -92,6 +98,9 @@ extern const unsigned pc_video_fps_limits[];         /* 0 (unlimited), 30, 60, .
 extern const unsigned pc_video_fps_limit_count;
 extern const unsigned pc_video_af_levels[];          /* 1 (off), 2, 4, 8, 16 */
 extern const unsigned pc_video_af_level_count;
+extern const unsigned pc_video_lod_distances[], pc_video_lod_distance_count;
+extern const unsigned pc_video_bullet_damages[], pc_video_bullet_damage_count;
+extern const unsigned pc_video_enemy_healths[], pc_video_enemy_health_count;
 
 /* Reads the settings file and the environment once (idempotent, thread safe). */
 void pc_video_init(void);

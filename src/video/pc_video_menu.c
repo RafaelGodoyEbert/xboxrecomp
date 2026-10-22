@@ -22,7 +22,9 @@ enum {
     R_AO_METHOD = PCV_ROW_AO_METHOD, R_AO_QUALITY = PCV_ROW_AO_QUALITY, R_REFLECTIONS = PCV_ROW_REFLECTIONS,
     R_RAY_TRACING = PCV_ROW_RAY_TRACING,
     R_FILTER = PCV_ROW_FILTER, R_VSYNC = PCV_ROW_VSYNC, R_FPS = PCV_ROW_FPS, R_BLUR = PCV_ROW_BLUR, R_CROSSHAIR = PCV_ROW_CROSSHAIR,
-    R_HITMARKERS = PCV_ROW_HITMARKERS, R_OPTIONAL_SECONDARIES = PCV_ROW_OPTIONAL_SECONDARIES, R_RESET = PCV_ROW_RESET,
+    R_HITMARKERS = PCV_ROW_HITMARKERS, R_OPTIONAL_SECONDARIES = PCV_ROW_OPTIONAL_SECONDARIES,
+    R_LOD_DISTANCE = PCV_ROW_LOD_DISTANCE, R_BULLET_DAMAGE = PCV_ROW_BULLET_DAMAGE,
+    R_ENEMY_HEALTH = PCV_ROW_ENEMY_HEALTH, R_HEADSHOT_INSTAKILL = PCV_ROW_HEADSHOT_INSTAKILL, R_RESET = PCV_ROW_RESET,
     R_DONE = PCV_ROW_DONE, R_COUNT = PCV_ROW_COUNT
 };
 enum { A_UP, A_DOWN, A_LEFT, A_RIGHT, A_ACCEPT, A_BACK, A_OPEN };
@@ -115,6 +117,13 @@ static unsigned size_list(const PcVideoSettings *cur, unsigned out[][2], unsigne
 /* ---- changing a row ------------------------------------------------------------------------------------- */
 
 static unsigned wrap(int v, unsigned n) { return (unsigned)(((v % (int)n) + (int)n) % (int)n); }
+static unsigned cycle_percent(unsigned current, const unsigned *values, unsigned count, int dir)
+{
+    unsigned i;
+    for (i = 0; i < count && values[i] != current; i++) {}
+    if (i == count) i = 0;
+    return values[wrap((int)i + dir, count)];
+}
 
 static unsigned row_lock_bit(int row);
 
@@ -198,6 +207,14 @@ int pc_video_menu_row_change(int row, int dir)
         s.hitmarkers = !s.hitmarkers; break;
     case R_OPTIONAL_SECONDARIES:
         s.optional_secondaries = !s.optional_secondaries; break;
+    case R_LOD_DISTANCE:
+        s.lod_distance = cycle_percent(s.lod_distance, pc_video_lod_distances, pc_video_lod_distance_count, dir); break;
+    case R_BULLET_DAMAGE:
+        s.bullet_damage = cycle_percent(s.bullet_damage, pc_video_bullet_damages, pc_video_bullet_damage_count, dir); break;
+    case R_ENEMY_HEALTH:
+        s.enemy_health = cycle_percent(s.enemy_health, pc_video_enemy_healths, pc_video_enemy_health_count, dir); break;
+    case R_HEADSHOT_INSTAKILL:
+        s.headshot_instakill = !s.headshot_instakill; break;
     default: return 0;
     }
     return pc_video_set(&s);
@@ -514,13 +531,15 @@ static int text_width(HFONT font, const wchar_t *text)
 static const char *const k_row_label[R_COUNT] = {
     "WINDOW MODE", "WINDOW SIZE", "INTERNAL RESOLUTION", "ANTI-ALIASING", "ANISOTROPIC FILTERING", "DEPTH OF FIELD",
     "SHARPENING", "AO METHOD", "AO QUALITY", "REFLECTIONS", "RAY TRACING (EXPERIMENTAL)", "ASPECT RATIO", "FIELD OF VIEW", "SCALING", "SCALING FILTER", "VSYNC", "FRAME RATE LIMIT",
-    "MOTION BLUR", "CROSSHAIR", "HIT MARKERS", "OPTIONAL SECONDARY OBJECTIVES", "RESET TO DEFAULTS", "DONE"
+    "MOTION BLUR", "CROSSHAIR", "HIT MARKERS", "OPTIONAL SECONDARY OBJECTIVES", "LOD DISTANCE", "BULLET DAMAGE",
+    "ENEMY HEALTH", "INSTANT-KILL HEADSHOTS", "RESET TO DEFAULTS", "DONE"
 };
 
 static const char *const k_row_label_pt[R_COUNT] = {
     "MODO DE JANELA", "RESOLUÇÃO", "RESOLUÇÃO INTERNA", "SUAVIZAÇÃO DE SERRILHADO", "FILTRAGEM ANISOTRÓPICA", "PROFUNDIDADE DE CAMPO",
     "NITIDEZ", "MÉTODO DE OCLUSÃO", "QUALIDADE DA OCLUSÃO", "REFLEXOS", "RAY TRACING (EXPERIMENTAL)", "PROPORÇÃO", "FOV", "ESCALA DA IMAGEM", "FILTRO DE ESCALA", "SINCRONIZAÇÃO VERTICAL", "LIMITE DE QUADROS",
-    "DESFOQUE DE MOVIMENTO", "MIRA", "MARCADORES DE ACERTO", "OBJETIVOS SECUNDÁRIOS OPCIONAIS", "RESTAURAR PADRÕES", "CONCLUÍDO"
+    "DESFOQUE DE MOVIMENTO", "MIRA", "MARCADORES DE ACERTO", "OBJETIVOS SECUNDÁRIOS OPCIONAIS", "DISTÂNCIA DE LOD", "DANO DAS BALAS",
+    "VIDA DOS INIMIGOS", "TIROS NA CABEÇA LETAIS", "RESTAURAR PADRÕES", "CONCLUÍDO"
 };
 
 static int video_menu_portuguese(void)
@@ -626,6 +645,10 @@ size_t pc_video_menu_row_value(int row, char *out, size_t cap)
         break;
     case R_HITMARKERS: strcpy(value, s->hitmarkers ? "ON" : "OFF"); break;
     case R_OPTIONAL_SECONDARIES: strcpy(value, s->optional_secondaries ? "ON" : "OFF"); break;
+    case R_LOD_DISTANCE: snprintf(value, sizeof(value), "%gX", s->lod_distance / 100.0); break;
+    case R_BULLET_DAMAGE: snprintf(value, sizeof(value), "%gX", s->bullet_damage / 100.0); break;
+    case R_ENEMY_HEALTH: snprintf(value, sizeof(value), "%gX", s->enemy_health / 100.0); break;
+    case R_HEADSHOT_INSTAKILL: strcpy(value, s->headshot_instakill ? "ON" : "OFF"); break;
     default: break;
     }
     if (video_menu_portuguese()) {
@@ -695,6 +718,18 @@ const char *pc_video_menu_row_help(int row)
     case R_OPTIONAL_SECONDARIES: return video_menu_text(
         "Allow mission completion without the required secondary objectives. Primary objectives are still required.",
         "Permite concluir a missão sem os objetivos secundários exigidos. Os objetivos primários continuam obrigatórios.");
+    case R_LOD_DISTANCE: return video_menu_text(
+        "Scales object and geometry detail distance. 1X keeps the original distances; higher values cost more performance.",
+        "Ajusta a distância de detalhe de objetos e cenários. 1X mantém as distâncias originais; valores maiores exigem mais desempenho.");
+    case R_BULLET_DAMAGE: return video_menu_text(
+        "Scales your bullets' damage against enemies. 1X keeps the original damage.",
+        "Ajusta o dano das suas balas contra inimigos. 1X mantém o dano original.");
+    case R_ENEMY_HEALTH: return video_menu_text(
+        "Scales enemy health when they spawn. 1X keeps the original health. Restart the mission to apply it to existing enemies.",
+        "Ajusta a vida dos inimigos ao surgirem. 1X mantém a vida original. Reinicie a missão para aplicar aos inimigos existentes.");
+    case R_HEADSHOT_INSTAKILL: return video_menu_text(
+        "Your confirmed headshots kill enemies instantly. Off keeps the game's normal damage rules.",
+        "Seus tiros confirmados na cabeça matam inimigos instantaneamente. Desligado mantém as regras normais de dano.");
     case R_RESET: return video_menu_text("Restores every video setting to its default. Locked settings keep their values.", "Restaura as configurações de vídeo para os valores padrão. Opções fixadas mantêm seus valores.");
     case R_DONE: return video_menu_text("Back to the Options page.", "Volta à página de opções.");
     default: return "";
@@ -737,6 +772,10 @@ static unsigned row_lock_bit(int row)
     case R_FILTER: return PCV_LOCK_FILTER; case R_VSYNC: return PCV_LOCK_VSYNC; case R_FPS: return PCV_LOCK_FPS;
     case R_BLUR: return PCV_LOCK_BLUR; case R_CROSSHAIR: return PCV_LOCK_CROSSHAIR; case R_HITMARKERS: return PCV_LOCK_HITMARKERS;
     case R_OPTIONAL_SECONDARIES: return PCV_LOCK_OPTIONAL_SECONDARIES;
+    case R_LOD_DISTANCE: return PCV_LOCK_LOD_DISTANCE;
+    case R_BULLET_DAMAGE: return PCV_LOCK_BULLET_DAMAGE;
+    case R_ENEMY_HEALTH: return PCV_LOCK_ENEMY_HEALTH;
+    case R_HEADSHOT_INSTAKILL: return PCV_LOCK_HEADSHOT_INSTAKILL;
     default: return 0;
     }
 }
