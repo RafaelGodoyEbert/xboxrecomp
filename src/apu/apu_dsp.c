@@ -511,7 +511,7 @@ uint64_t mcpx_apu_dsp_mmio_read(MCPXAPUState *d, hwaddr addr,
     dsp = is_gp ? d->gp.dsp : d->ep.dsp;
     if (!dsp) return 0;
     regs = is_gp ? d->gp.regs : d->ep.regs;
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     result = addr == NV_PAPU_GPRST ? regs[addr]
                                   : dsp->core.pram[(addr - NV_PAPU_GPPMEM) / 4];
     qemu_mutex_unlock(&d->lock);
@@ -527,7 +527,7 @@ void mcpx_apu_dsp_mmio_write(MCPXAPUState *d, hwaddr addr, uint64_t val,
     dsp = is_gp ? d->gp.dsp : d->ep.dsp;
     if (!dsp) return;
     regs = is_gp ? d->gp.regs : d->ep.regs;
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     if (addr == NV_PAPU_GPRST) {
         const uint32_t enabled = NV_PAPU_GPRST_GPRST | NV_PAPU_GPRST_GPDSPRST;
         uint32_t old = regs[addr], value = (uint32_t)val;

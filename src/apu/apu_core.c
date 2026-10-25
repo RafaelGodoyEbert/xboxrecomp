@@ -76,7 +76,7 @@ void mcpx_apu_set_irq_line(void (*line)(int asserted))
 void mcpx_apu_irq_service_begin(void *opaque)
 {
     MCPXAPUState *d = (MCPXAPUState *)opaque;
-    if (d) qemu_mutex_lock(&d->lock);
+    if (d) mcpx_apu_lock(d);
 }
 
 void mcpx_apu_irq_service_end(void *opaque)
@@ -144,7 +144,7 @@ uint64_t mcpx_apu_read(void *opaque, hwaddr addr, unsigned int size)
     MCPXAPUState *d = (MCPXAPUState *)opaque;
     uint64_t r = 0;
 
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     switch (addr) {
     case NV_PAPU_XGSCNT:
         r = (uint64_t)(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / 100);
@@ -176,7 +176,7 @@ void mcpx_apu_write(void *opaque, hwaddr addr, uint64_t val,
      */
     (void)size;
 
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     switch (addr) {
     case NV_PAPU_ISTS:
         qatomic_and(&d->regs[NV_PAPU_ISTS], ~(uint32_t)val);
@@ -683,6 +683,13 @@ static void throttle(MCPXAPUState *d)
         return;
     }
 
+    /* An overloaded DSP can stay behind every deadline, so the timed wait
+     * below may never release the device mutex. Register MMIO, IRQ service
+     * and shutdown are not PIO waiters and cannot use the per-frame PIO
+     * handoff. Service contention independently of pacing; the frame loop
+     * rechecks exit/pause/front-end state on return. */
+    mcpx_apu_handoff(d);
+
     int64_t now_us = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
 
     if (mcpx_apu_rebase_deadline(&d->next_frame_time_us,
@@ -968,6 +975,7 @@ MCPXAPUState *mcpx_apu_init_standalone_sized(uint8_t *ram_ptr, size_t ram_size)
     qemu_mutex_lock(&d->lock);
     qemu_cond_init(&d->cond);
     qemu_cond_init(&d->idle_cond);
+    qemu_cond_init(&d->lock_handoff_cond);
 
     /* Init VP (voice processor) */
     mcpx_apu_vp_init(d);
@@ -998,7 +1006,7 @@ void mcpx_apu_shutdown(MCPXAPUState *d)
 
     fprintf(stderr, "[APU] Shutting down MCPX APU...\n");
 
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     mcpx_apu_wait_for_idle(d);
     qatomic_set(&d->exiting, true);
     qemu_cond_signal(&d->cond);
@@ -1106,7 +1114,7 @@ void mcpx_apu_play_test_tone(MCPXAPUState *d)
     g_test_tone.active = true;
 
     /* Make sure waveOut is running - enable SECTL and resume APU thread */
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     d->regs[NV_PAPU_SECTL] = NV_PAPU_SECTL_XCNTMODE & ~NV_PAPU_SECTL_XCNTMODE_OFF;
     d->regs[NV_PAPU_FECTL] = NV_PAPU_FECTL_FEMETHMODE_FREE_RUNNING;
     /* Initialize empty voice lists so VP frame doesn't crash */
@@ -1225,7 +1233,7 @@ void apu_mixer_play(int slot, int looping)
     /* The frame thread takes the APU lock before the mixer lock. */
     extern MCPXAPUState *g_state;
     if (g_state) {
-        qemu_mutex_lock(&g_state->lock);
+        mcpx_apu_lock(g_state);
         g_state->pause_requested = false;
         qemu_cond_signal(&g_state->cond);
         qemu_mutex_unlock(&g_state->lock);
