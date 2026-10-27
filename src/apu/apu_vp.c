@@ -229,7 +229,7 @@ static void voice_off(MCPXAPUState *d, uint16_t v)
 static void voice_lock(MCPXAPUState *d, uint16_t v, bool lock)
 {
     assert(v < MCPX_HW_MAX_VOICES);
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
 
     uint64_t mask = 1ULL << (v % 64);
     if (lock) {
@@ -725,7 +725,7 @@ void mcpx_apu_vp_write(void *opaque, hwaddr addr, uint64_t val,
      * must not race that publication or one another. The shim's mutex is
      * recursive, as VOICE_LOCK also takes it. */
     InterlockedIncrement(&g_apu_pio_waiters);
-    qemu_mutex_lock(&d->lock);
+    mcpx_apu_lock(d);
     InterlockedDecrement(&g_apu_pio_waiters);
     fe_method(d, (uint32_t)addr, (uint32_t)val);
     qemu_mutex_unlock(&d->lock);

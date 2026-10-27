@@ -464,6 +464,9 @@ struct MCPXAPUState {
     QemuMutex lock;
     QemuCond cond;
     QemuCond idle_cond;
+    QemuCond lock_handoff_cond;
+    volatile LONG lock_waiters;
+    bool lock_handoff_waiting; /* Protected by lock. */
     bool pause_requested;
     bool is_idle;
 
@@ -524,6 +527,8 @@ struct MCPXAPUState {
         int queued_bytes_low, queued_bytes_high;
     } monitor;
 };
+
+#include "apu_lock.h"
 
 /* ============================================================
  * Forward declarations for APU sub-module functions
