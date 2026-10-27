@@ -105,6 +105,9 @@ PcMode pc_input_prompt_mode(void);
  * from the user's loaded XBE when the live map is not ready. Called on the OHCI thread. */
 typedef int (*PcControlResolver)(int slot);
 void pc_input_set_control_resolver(PcControlResolver resolver);
+/* The game's aim hook publishes its current setting. Retain held Aim across
+ * short camera gaps only in Hold mode; pause, movies and focus loss clear it. */
+void pc_input_set_aim_hold_mode(int enabled);
 
 /* ---- input filter -------------------------------------------------------------------------------- */
 
@@ -148,7 +151,7 @@ void pc_input_set_movie_active_query(int (*movie_active)(void));
 void pc_input_set_gameplay_blocked_query(int (*blocked)(void));
 /* One validated native completed frame, independent of UI presentation.
  * An unblocked frame without a camera tick suspends gameplay controls but keeps
- * physically held movement and Fire bindings. Within 400 ms of focused camera
+ * physically held movement, Fire and Hold-mode Aim bindings. Within 400 ms of focused camera
  * evidence, those holds still report gameplay controls without entering the
  * menu layer or retaining released taps. Other pending taps/action holds are
  * discarded; pause/movie/focus loss discards movement and Fire holds too. */

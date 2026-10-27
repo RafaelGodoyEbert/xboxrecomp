@@ -75,6 +75,7 @@ typedef struct PcVideoSettings {
     unsigned bullet_damage;                    /* percentage of player bullet damage against enemies */
     unsigned enemy_health;                     /* percentage of enemy health at spawn */
     unsigned headshot_instakill;                /* 1 = confirmed player headshots kill enemies */
+    unsigned aim_hold;                         /* 0 = original toggle, 1 = hold the aim button */
     unsigned split_screen;                    /* 1 = split-screen, player two in the bottom half (pc_split.h) */
     unsigned render_override_w, render_override_h; /* both non-zero: an explicit raster size (RECOMP_RENDER_*) */
 } PcVideoSettings;

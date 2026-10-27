@@ -553,6 +553,8 @@ PcMode pc_input_prompt_mode(void) { pc_input_init(); return s_prompt_mode; }
 
 int pc_input_trace_enabled(void) { pc_input_init(); return s_trace; }
 
+static volatile LONG s_aim_hold_mode;
+void pc_input_set_aim_hold_mode(int enabled) { InterlockedExchange(&s_aim_hold_mode, enabled != 0); }
 void pc_input_set_control_resolver(PcControlResolver resolver) { s_resolver = resolver; }
 void pc_input_set_movie_active_query(int (*q)(void)) { s_movie_active = q; }
 void pc_input_set_gameplay_blocked_query(int (*q)(void)) { s_gameplay_blocked_query = q; }
@@ -690,8 +692,8 @@ static void mark_device(PcDevice d)
 
 static int source_matches(unsigned binding, unsigned source);
 
-/* Only held movement and Fire may survive an unblocked frame without a camera
- * update. A source also bound to a discrete action must not replay it. */
+/* Held movement, Fire and (in Hold mode) Aim may survive an unblocked frame
+ * without a camera update. A source also bound to a discrete action must not replay it. */
 static int gameplay_hold_source(unsigned source)
 {
     int action, i, hold = 0;
@@ -699,7 +701,8 @@ static int gameplay_hold_source(unsigned source)
     for (action = 0; action < PC_ACTION_COUNT; ++action) {
         for (i = 0; i < s_bindings[action].count; ++i) {
             if (!source_matches(s_bindings[action].b[i].src, source)) continue;
-            if (action > PC_ACTION_MOVE_RIGHT && action != PC_ACTION_FIRE) return 0;
+            if (action > PC_ACTION_MOVE_RIGHT && action != PC_ACTION_FIRE &&
+                !(action == PC_ACTION_AIM && s_aim_hold_mode)) return 0;
             hold = 1;
         }
     }
@@ -1103,7 +1106,7 @@ static uint32_t collect_controls(int gameplay, uint64_t now)
     for (a = 0; a < PC_ACTION_COUNT; a++) {
         int active;
         if (gameplay) active = binding_active(a, now, gameplay);
-        else if (a <= PC_ACTION_MOVE_RIGHT || a == PC_ACTION_FIRE)
+        else if (a <= PC_ACTION_MOVE_RIGHT || a == PC_ACTION_FIRE || (a == PC_ACTION_AIM && s_aim_hold_mode))
             active = gameplay_hold_gap_binding_active(a, now);
         else active = 0;
         if (active) {
@@ -1643,6 +1646,7 @@ void pc_input_test_reset(void)
     clear_state(0);
     for (i = 0; i < PC_ACTION_COUNT; i++) s_bindings[i].count = 0;
     s_resolver = NULL;
+    s_aim_hold_mode = 0;
     s_movie_active = NULL;
     s_gameplay_blocked_query = NULL;
     s_gameplay_tick = 0;

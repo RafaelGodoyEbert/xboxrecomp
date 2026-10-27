@@ -230,6 +230,9 @@ static int apply_key(PcVideoSettings *s, const char *key, const char *value)
         if (parse_uint(value, 50, 1000, &u) && in_list(pc_video_bullet_damages, pc_video_bullet_damage_count, u)) { s->bullet_damage = u; return 1; }
     } else if (!_stricmp(key, "enemy_health")) {
         if (parse_uint(value, 25, 400, &u) && in_list(pc_video_enemy_healths, pc_video_enemy_health_count, u)) { s->enemy_health = u; return 1; }
+    } else if (!_stricmp(key, "aim_mode")) {
+        if (!_stricmp(value, "toggle")) { s->aim_hold = 0; return 1; }
+        if (!_stricmp(value, "hold")) { s->aim_hold = 1; return 1; }
     } else if (!_stricmp(key, "headshot_instakill")) {
         if (!_stricmp(value, "on")) { s->headshot_instakill = 1; return 1; }
         if (!_stricmp(value, "off")) { s->headshot_instakill = 0; return 1; }
@@ -304,6 +307,7 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         "bullet_damage=%u\n"
         "enemy_health=%u\n"
         "headshot_instakill=%s\n"
+        "aim_mode=%s\n"
         "split_screen=%s\n",
         s->internal_height, s->window_width, s->window_height,
         s->borderless ? "borderless" : "windowed",
@@ -318,7 +322,7 @@ size_t pc_video_format(const PcVideoSettings *s, char *out, size_t cap)
         k_refl_names[s->reflections < PCV_REFL_COUNT ? s->reflections : PCV_REFL_HIGH], s->ray_tracing ? "on" : "off",
         k_crosshair_names[s->crosshair < CROSSHAIR_COUNT ? s->crosshair : 0], s->hitmarkers ? "on" : "off",
         s->optional_secondaries ? "on" : "off", s->lod_distance, s->bullet_damage, s->enemy_health,
-        s->headshot_instakill ? "on" : "off", s->split_screen ? "on" : "off");
+        s->headshot_instakill ? "on" : "off", s->aim_hold ? "hold" : "toggle", s->split_screen ? "on" : "off");
     return n < 0 ? 0 : (size_t)n;
 }
 
@@ -603,7 +607,8 @@ static int valid_settings(const PcVideoSettings *s)
            s->crosshair < CROSSHAIR_COUNT && s->hitmarkers <= 1 && s->optional_secondaries <= 1 && s->split_screen <= 1 &&
            in_list(pc_video_lod_distances, pc_video_lod_distance_count, s->lod_distance) &&
            in_list(pc_video_bullet_damages, pc_video_bullet_damage_count, s->bullet_damage) &&
-           in_list(pc_video_enemy_healths, pc_video_enemy_health_count, s->enemy_health) && s->headshot_instakill <= 1;
+           in_list(pc_video_enemy_healths, pc_video_enemy_health_count, s->enemy_health) && s->headshot_instakill <= 1 &&
+           s->aim_hold <= 1;
 }
 
 /* The new values over the current ones, except where the environment holds a field. */
