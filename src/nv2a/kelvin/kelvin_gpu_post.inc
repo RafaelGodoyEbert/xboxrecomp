@@ -1102,10 +1102,10 @@ static ID3D11Texture2D *kg_capture(ID3D11Texture2D *tex, unsigned int w, unsigne
         if (sequence.count > 120) sequence.count = 120;
     }
     if (*sequence.prefix && sequence.taken < sequence.count &&
-        G.frames + 1 >= sequence.first + (uint64_t)sequence.taken * sequence.interval &&
+        G.frames >= sequence.first + (uint64_t)sequence.taken * sequence.interval &&
         !InterlockedCompareExchange(&s_capture_pending, 0, 0)) {
         char path[MAX_PATH + 32];
-        snprintf(path, sizeof(path), "%s_%llu.bmp", sequence.prefix, (unsigned long long)(G.frames + 1));
+        snprintf(path, sizeof(path), "%s_%llu.bmp", sequence.prefix, (unsigned long long)G.frames);
         kgpu_request_capture(path);
         sequence.taken++;
     }
