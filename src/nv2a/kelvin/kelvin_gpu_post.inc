@@ -64,7 +64,11 @@ static const char kgpu_hlsl_post[] =
 "float coc_ps(float4 p : SV_Position) : SV_Target {\n"
 "    float d = DepthTex.Load(int3((int2)p.xy, 0));\n"
 "    float f = FocusTex.Load(int3(0, 0, 0));\n"
-"    float dz = d - f;\n"
+"    // Perspective depth is 1-near/z. A fixed raw-depth tolerance makes all\n"
+"    // scenery sharp once 1-f is smaller than that tolerance. Dividing by\n"
+"    // 1-f gives 1-z_focus/z: the same distance ratio has the same blur.\n"
+"    if (!(d >= 0.0 && d <= 1.0 && f >= 0.0 && f < 1.0)) return 0.0;\n"
+"    float dz = (d - f) / max(0.000001, 1.0 - f);\n"
 "    float far = saturate((dz - p2.x) * p1.w);\n"
 "    float nr = saturate((-dz - p2.x) * p1.w) * p2.y;\n"
 "    return max(far, nr);\n"
@@ -405,6 +409,12 @@ static struct {
     char ao_dump[MAX_PATH], ao_scene_prefix[MAX_PATH];
     uint64_t ao_dump_frame, ao_scene_frame;
     bool ao_dump_done, ao_scene_done, post_trace, ao_skip_traced, focus_skipped;
+    char dof_scene_prefix[MAX_PATH];                         /* opt-in same-frame RGB/CoC evidence */
+    uint64_t dof_scene_frame;
+    bool dof_scene_done;
+    char sharp_scene_prefix[MAX_PATH];
+    uint64_t sharp_scene_frame;
+    bool sharp_scene_done;
 } s_post;
 
 static void kg_post_free(void)
@@ -507,6 +517,21 @@ static bool post_ao_resources(unsigned int w, unsigned int h)
             return false;
         }
     }
+    return true;
+}
+
+/* Output-sized scratch is separate from scene/focus resources: DLSS changes
+ * the colour size after DoF, while its depth and focus history stay low-res. */
+static bool post_output_resources(unsigned int w, unsigned int h)
+{
+    if (s_post.ss && s_post.ss_w == w && s_post.ss_h == h) return true;
+    SAFE_RELEASE(s_post.ss_srv); SAFE_RELEASE(s_post.ss_rtv); SAFE_RELEASE(s_post.ss);
+    s_post.ss_w = s_post.ss_h = 0;
+    if (!post_texture(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, &s_post.ss, &s_post.ss_srv, &s_post.ss_rtv)) {
+        SAFE_RELEASE(s_post.ss_srv); SAFE_RELEASE(s_post.ss_rtv); SAFE_RELEASE(s_post.ss);
+        return false;
+    }
+    s_post.ss_w = w; s_post.ss_h = h;
     return true;
 }
 
@@ -698,6 +723,82 @@ static void post_ao_scene_compare(KGpuSurf *cs, const uint8_t *before, const cha
     free(after);
 }
 
+/* One requested DoF observation, read back after the actual GPU passes. The
+ * before/after pair is the same scene in the same frame, before any HUD draw. */
+static void post_dof_capture(KGpuSurf *cs, KGpuSurf *zs, uint64_t frame)
+{
+    ID3D11Texture2D *stage = NULL;
+    D3D11_TEXTURE2D_DESC td;
+    D3D11_MAPPED_SUBRESOURCE ms;
+    char path[MAX_PATH + 16];
+    uint8_t *pixels;
+    unsigned int x, y, minv = 255, maxv = 0;
+    uint64_t sum = 0, blurred = 0;
+    float focus = -1.0f;
+    snprintf(path, sizeof(path), "%s_before.bmp", s_post.dof_scene_prefix);
+    free(post_ao_colour_capture(s_post.copy, cs->hw, cs->hh, path));
+    snprintf(path, sizeof(path), "%s_after.bmp", s_post.dof_scene_prefix);
+    free(post_ao_colour_capture(cs->tex, cs->hw, cs->hh, path));
+    ID3D11Texture2D_GetDesc(s_post.focus[s_post.focus_cur], &td);
+    td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (SUCCEEDED(ID3D11Device_CreateTexture2D(G.dev, &td, NULL, &stage))) {
+        ID3D11DeviceContext_CopyResource(G.ctx, (ID3D11Resource *)stage, (ID3D11Resource *)s_post.focus[s_post.focus_cur]);
+        if (SUCCEEDED(ID3D11DeviceContext_Map(G.ctx, (ID3D11Resource *)stage, 0, D3D11_MAP_READ, 0, &ms))) {
+            focus = *(const float *)ms.pData;
+            ID3D11DeviceContext_Unmap(G.ctx, (ID3D11Resource *)stage, 0);
+        }
+        SAFE_RELEASE(stage);
+    }
+    /* Header (width, height, focus), followed by packed float32 scene depth.
+     * Enables replay of both shaders on exactly the observed game geometry. */
+    ID3D11Texture2D_GetDesc(zs->tex, &td);
+    if (td.Format == DXGI_FORMAT_R32G8X24_TYPELESS) {
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (SUCCEEDED(ID3D11Device_CreateTexture2D(G.dev, &td, NULL, &stage))) {
+            ID3D11DeviceContext_CopyResource(G.ctx, (ID3D11Resource *)stage, (ID3D11Resource *)zs->tex);
+            if (SUCCEEDED(ID3D11DeviceContext_Map(G.ctx, (ID3D11Resource *)stage, 0, D3D11_MAP_READ, 0, &ms))) {
+                FILE *file;
+                snprintf(path, sizeof(path), "%s_depth.bin", s_post.dof_scene_prefix);
+                file = fopen(path, "wb");
+                if (file) {
+                    fwrite(&cs->hw, sizeof(cs->hw), 1, file); fwrite(&cs->hh, sizeof(cs->hh), 1, file);
+                    fwrite(&focus, sizeof(focus), 1, file);
+                    for (y = 0; y < cs->hh; y++) for (x = 0; x < cs->hw; x++)
+                        fwrite((const uint8_t *)ms.pData + (size_t)y * ms.RowPitch + (size_t)x * 8, sizeof(float), 1, file);
+                    fclose(file);
+                }
+                ID3D11DeviceContext_Unmap(G.ctx, (ID3D11Resource *)stage, 0);
+            }
+            SAFE_RELEASE(stage);
+        }
+    }
+    ID3D11Texture2D_GetDesc(s_post.coc, &td);
+    td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (FAILED(ID3D11Device_CreateTexture2D(G.dev, &td, NULL, &stage))) return;
+    ID3D11DeviceContext_CopyResource(G.ctx, (ID3D11Resource *)stage, (ID3D11Resource *)s_post.coc);
+    if (SUCCEEDED(ID3D11DeviceContext_Map(G.ctx, (ID3D11Resource *)stage, 0, D3D11_MAP_READ, 0, &ms))) {
+        pixels = (uint8_t *)malloc((size_t)cs->hw * cs->hh * 4);
+        for (y = 0; y < cs->hh; y++) for (x = 0; x < cs->hw; x++) {
+            const unsigned int v = *((const uint8_t *)ms.pData + (size_t)y * ms.RowPitch + x);
+            if (v < minv) minv = v;
+            if (v > maxv) maxv = v;
+            sum += v; blurred += v != 0;
+            if (pixels) {
+                const size_t k = ((size_t)y * cs->hw + x) * 4;
+                pixels[k] = pixels[k + 1] = pixels[k + 2] = (uint8_t)v; pixels[k + 3] = 255;
+            }
+        }
+        snprintf(path, sizeof(path), "%s_coc.bmp", s_post.dof_scene_prefix);
+        if (pixels) { write_bmp(path, pixels, cs->hw, cs->hh, cs->hw * 4); free(pixels); }
+        fprintf(stderr, "[KPOST] frame %llu dof %d focus %.9g CoC min %u max %u mean %.4f nonzero %llu/%llu\n",
+                (unsigned long long)frame, s_post.dof, (double)focus, minv, maxv,
+                (double)sum / ((double)cs->hw * cs->hh), (unsigned long long)blurred,
+                (unsigned long long)((uint64_t)cs->hw * cs->hh));
+        ID3D11DeviceContext_Unmap(G.ctx, (ID3D11Resource *)stage, 0);
+    }
+    SAFE_RELEASE(stage);
+}
+
 /* The effects on the finished scene in `cs`. AO and depth of field need its real depth buffer in `zs`. */
 static void kg_post_ao_scene(KGpuSurf *cs, KGpuSurf *zs)
 {
@@ -744,12 +845,12 @@ static void kg_post_ao_scene(KGpuSurf *cs, KGpuSurf *zs)
 
 static void kg_post_scene(KGpuSurf *cs, KGpuSurf *zs)
 {
-    float taps, radius, depth_scale = 140.0f;
+    float taps, radius, depth_scale = 2.0f;
     long long now = qpc_now();
     bool dlaa, upscale, upscaled = false;
-    s_post.done = true;
     if (!s_post.scene_fx || !cs || cs->bpp != 4 || cs->dxfmt != DXGI_FORMAT_B8G8R8A8_UNORM || !post_init() ||
         !post_scene_resources(cs->hw, cs->hh)) return;
+    s_post.done = true;
     {
         const char *e = getenv("RECOMP_KGPU_DOF_SCALE");
         if (e && *e) depth_scale = (float)atof(e);
@@ -781,11 +882,15 @@ static void kg_post_scene(KGpuSurf *cs, KGpuSurf *zs)
         s_post.focus_skipped = false;
         post_dof_preset(s_post.dof, &taps, &radius);
         ID3D11DeviceContext_CopyResource(G.ctx, (ID3D11Resource *)s_post.copy, (ID3D11Resource *)cs->tex);
-        post_cb((float)cs->hw, (float)cs->hh, taps, radius * (float)cs->hh, alpha, depth_scale, 0.002f, 0.0f, 0.0f, 1.0f, 1.0f);
+        post_cb((float)cs->hw, (float)cs->hh, taps, radius * (float)cs->hh, alpha, depth_scale, 0.10f, 0.0f, 0.0f, 1.0f, 1.0f);
         post_pass(s_post.ps_focus, s_post.focus_rtv[next], 1, 1, NULL, NULL, zs->srv, s_post.focus_srv[s_post.focus_cur]);
         s_post.focus_cur = next;
         post_pass(s_post.ps_coc, s_post.coc_rtv, cs->hw, cs->hh, NULL, NULL, zs->srv, s_post.focus_srv[next]);
         post_pass(s_post.ps_dof, cs->rtv, cs->hw, cs->hh, s_post.copy_srv, s_post.coc_srv, NULL, NULL);
+        if (!s_post.dof_scene_done && *s_post.dof_scene_prefix && G.frames + 1 >= s_post.dof_scene_frame) {
+            post_dof_capture(cs, zs, G.frames + 1);
+            s_post.dof_scene_done = true;
+        }
         /* A frame without usable depth did not observe a focus surface. Keep
          * the last observation time so a long interruption actually triggers
          * kg_post_focus_blend's immediate reacquisition when depth returns. */
@@ -803,10 +908,22 @@ static void kg_post_scene(KGpuSurf *cs, KGpuSurf *zs)
         post_cb((float)cs->hw, (float)cs->hh, 0, 0, 0, 0, 0, 0, 0, 1.0f, 1.0f);
         post_pass(s_post.ps_fxaa, cs->rtv, cs->hw, cs->hh, s_post.copy_srv, NULL, NULL, NULL);
     }
-    if (s_post.sharpen && !upscaled) {
-        ID3D11DeviceContext_CopyResource(G.ctx, (ID3D11Resource *)s_post.copy, (ID3D11Resource *)cs->tex);
+    if (s_post.sharpen && (!upscaled || post_output_resources(cs->hw, cs->hh))) {
+        ID3D11Texture2D *copy = upscaled ? s_post.ss : s_post.copy;
+        ID3D11ShaderResourceView *copy_srv = upscaled ? s_post.ss_srv : s_post.copy_srv;
+        ID3D11DeviceContext_CopyResource(G.ctx, (ID3D11Resource *)copy, (ID3D11Resource *)cs->tex);
         post_cb((float)cs->hw, (float)cs->hh, 0, 0, 0, 0, 0, 0, s_post.sharpen == 1 ? 0.25f : s_post.sharpen == 2 ? 0.55f : 0.9f, 1.0f, 1.0f);
-        post_pass(s_post.ps_sharp, cs->rtv, cs->hw, cs->hh, s_post.copy_srv, NULL, NULL, NULL);
+        post_pass(s_post.ps_sharp, cs->rtv, cs->hw, cs->hh, copy_srv, NULL, NULL, NULL);
+        if (!s_post.sharp_scene_done && *s_post.sharp_scene_prefix && G.frames + 1 >= s_post.sharp_scene_frame) {
+            char path[MAX_PATH + 16];
+            snprintf(path, sizeof(path), "%s_before.bmp", s_post.sharp_scene_prefix);
+            free(post_ao_colour_capture(copy, cs->hw, cs->hh, path));
+            snprintf(path, sizeof(path), "%s_after.bmp", s_post.sharp_scene_prefix);
+            free(post_ao_colour_capture(cs->tex, cs->hw, cs->hh, path));
+            fprintf(stderr, "[KPOST] frame %llu sharpening applied: level %d aa %d upscaled %d size %ux%u\n",
+                    (unsigned long long)(G.frames + 1), s_post.sharpen, s_post.aa, (int)upscaled, cs->hw, cs->hh);
+            s_post.sharp_scene_done = true;
+        }
     }
     kg_cache_invalidate();
 }
@@ -855,6 +972,14 @@ static void kg_post_poll(void)
         s_post.ao_scene_frame = e && *e ? strtoull(e, NULL, 0) : 120;
         e = getenv("RECOMP_KGPU_POST_TRACE");
         s_post.post_trace = e && *e && atoi(e) != 0;
+        e = getenv("RECOMP_KGPU_DOF_SCENE_DUMP_PREFIX");
+        if (e && *e) snprintf(s_post.dof_scene_prefix, sizeof(s_post.dof_scene_prefix), "%s", e);
+        e = getenv("RECOMP_KGPU_DOF_SCENE_DUMP_FRAME");
+        s_post.dof_scene_frame = e && *e ? strtoull(e, NULL, 0) : 120;
+        e = getenv("RECOMP_KGPU_SHARP_SCENE_DUMP_PREFIX");
+        if (e && *e) snprintf(s_post.sharp_scene_prefix, sizeof(s_post.sharp_scene_prefix), "%s", e);
+        e = getenv("RECOMP_KGPU_SHARP_SCENE_DUMP_FRAME");
+        s_post.sharp_scene_frame = e && *e ? strtoull(e, NULL, 0) : 120;
         e = getenv("RECOMP_KGPU_SSR_ENV");
         if (e && *e) s_ssr_env_mix = (float)atof(e);
         if (!(s_ssr_env_mix >= 0.0f)) s_ssr_env_mix = 0.0f;
@@ -874,6 +999,9 @@ static void kg_post_poll(void)
     s_ssr_setting = v.reflections < PCV_REFL_COUNT ? (int)v.reflections : PCV_REFL_HIGH;
     s_post.scene_fx = s_post.ao_method != PCV_AO_OFF || s_post.aa == PCV_AA_FXAA || s_post.aa >= PCV_AA_DLAA || s_post.dof || s_post.sharpen || s_post.depth_stats > 0 ||
                       s_ssr_setting > 0;
+    if (s_post.post_trace)
+        fprintf(stderr, "[KPOST] settings generation %u aa %d dof %d sharpen %d ao %d quality %d reflections %d af %u\n",
+                gen, s_post.aa, s_post.dof, s_post.sharpen, s_post.ao_method, s_post.ao_quality, s_ssr_setting, v.af);
     if ((int)v.af != s_af) {
         unsigned int i;
         s_af = (int)v.af;
@@ -960,6 +1088,27 @@ static int write_png(const char *path, const uint8_t *bgra, unsigned int w, unsi
 
 static ID3D11Texture2D *kg_capture(ID3D11Texture2D *tex, unsigned int w, unsigned int h)
 {
+    /* Finite, opt-in native capture sequences for reproducible lab observations,
+     * including moving bodies. No global input or photo-mode simulation pause. */
+    static struct { bool init; char prefix[MAX_PATH]; uint64_t first, interval; unsigned int count, taken; } sequence;
+    if (!sequence.init) {
+        const char *e = getenv("RECOMP_KGPU_CAPTURE_PREFIX");
+        sequence.init = true;
+        if (e && *e) snprintf(sequence.prefix, sizeof(sequence.prefix), "%s", e);
+        e = getenv("RECOMP_KGPU_CAPTURE_FRAME"); sequence.first = e && *e ? strtoull(e, NULL, 0) : 120;
+        e = getenv("RECOMP_KGPU_CAPTURE_INTERVAL"); sequence.interval = e && *e ? strtoull(e, NULL, 0) : 60;
+        e = getenv("RECOMP_KGPU_CAPTURE_COUNT"); sequence.count = e && *e ? (unsigned int)strtoul(e, NULL, 0) : 1;
+        if (!sequence.interval) sequence.interval = 1;
+        if (sequence.count > 120) sequence.count = 120;
+    }
+    if (*sequence.prefix && sequence.taken < sequence.count &&
+        G.frames + 1 >= sequence.first + (uint64_t)sequence.taken * sequence.interval &&
+        !InterlockedCompareExchange(&s_capture_pending, 0, 0)) {
+        char path[MAX_PATH + 32];
+        snprintf(path, sizeof(path), "%s_%llu.bmp", sequence.prefix, (unsigned long long)(G.frames + 1));
+        kgpu_request_capture(path);
+        sequence.taken++;
+    }
     if (InterlockedCompareExchange(&s_capture_pending, 0, 0)) {
         const size_t n = strlen(s_capture_path);
         const int png = n > 4 && !_stricmp(s_capture_path + n - 4, ".png");
@@ -977,14 +1126,7 @@ static ID3D11Texture2D *kg_post_flip_source(KGpuSurf *cs, unsigned int *w, unsig
 {
     if (G.out_w == 0 || G.out_h == 0 || (G.out_w == cs->hw && G.out_h == cs->hh) || cs->hw % G.out_w || cs->hh % G.out_h ||
         !post_init()) { *w = cs->hw; *h = cs->hh; return kg_capture(cs->tex, cs->hw, cs->hh); }
-    if (!s_post.ss || s_post.ss_w != G.out_w || s_post.ss_h != G.out_h) {
-        SAFE_RELEASE(s_post.ss_srv); SAFE_RELEASE(s_post.ss_rtv); SAFE_RELEASE(s_post.ss);
-        if (!post_texture(G.out_w, G.out_h, DXGI_FORMAT_B8G8R8A8_UNORM, &s_post.ss, &s_post.ss_srv, &s_post.ss_rtv)) {
-            SAFE_RELEASE(s_post.ss_srv); SAFE_RELEASE(s_post.ss_rtv); SAFE_RELEASE(s_post.ss);
-            *w = cs->hw; *h = cs->hh; return cs->tex;
-        }
-        s_post.ss_w = G.out_w; s_post.ss_h = G.out_h;
-    }
+    if (!post_output_resources(G.out_w, G.out_h)) { *w = cs->hw; *h = cs->hh; return kg_capture(cs->tex, cs->hw, cs->hh); }
     post_cb((float)cs->hw, (float)cs->hh, 0, 0, 0, 0, 0, 0, 0, (float)G.out_w, (float)G.out_h);
     post_pass(s_post.ps_ssaa, s_post.ss_rtv, G.out_w, G.out_h, cs->srv, NULL, NULL, NULL);
     kg_cache_invalidate();
