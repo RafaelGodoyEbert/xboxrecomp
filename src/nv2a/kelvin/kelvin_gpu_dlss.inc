@@ -141,9 +141,29 @@ static bool kg_dlss_run(KGpuSurf *cs, KGpuSurf *zs)
     bool reset;
     long long now = qpc_now();
     D3D11_MAPPED_SUBRESOURCE ms;
-    if (!kg_dlss_ready() || !zs || !zs->depth || !zs->srv || !zs->tex || zs->hw != cs->hw || zs->hh != cs->hh || !s_dlss.ncam) return false;
+    static unsigned skip_traced;
+    if (!kg_dlss_ready()) return false;
+    if (!zs || !zs->depth || !zs->srv || !zs->tex || zs->hw != cs->hw || zs->hh != cs->hh || !s_dlss.ncam) {
+        const unsigned reason = !s_dlss.ncam ? 1u : 2u;
+        if (s_post.post_trace && !(skip_traced & reason)) {
+            skip_traced |= reason;
+            fprintf(stderr, "[DLSS] skipped: world cameras %u depth present %d sampleable %d depth size %ux%u scene %ux%u\n",
+                    s_dlss.ncam, zs != NULL, zs && zs->depth && zs->srv && zs->tex,
+                    zs ? zs->hw : 0, zs ? zs->hh : 0, cs->hw, cs->hh);
+        }
+        return false;
+    }
     for (i = 1; i < s_dlss.ncam; i++) if (s_dlss.cam[i].n > s_dlss.cam[best].n) best = i;
-    if (!kg_rtc_inv4(s_dlss.cam[best].m, inv)) return false;
+    if (!kg_rtc_inv4(s_dlss.cam[best].m, inv)) {
+        if (s_post.post_trace && !(skip_traced & 4u)) {
+            skip_traced |= 4u;
+            fprintf(stderr, "[DLSS] skipped: singular world camera %u of %u (%u draws)\n", best, s_dlss.ncam, s_dlss.cam[best].n);
+            for (i = 0; i < 4; i++) fprintf(stderr, "[DLSS] camera row %u: %.9g %.9g %.9g %.9g\n", i,
+                    (double)s_dlss.cam[best].m[i * 4], (double)s_dlss.cam[best].m[i * 4 + 1],
+                    (double)s_dlss.cam[best].m[i * 4 + 2], (double)s_dlss.cam[best].m[i * 4 + 3]);
+        }
+        return false;
+    }
     {
         unsigned int show_w, show_h;
         bool up;
@@ -198,6 +218,14 @@ static bool kg_dlss_run(KGpuSurf *cs, KGpuSurf *zs)
         kg_cache_invalidate();
         if (!kdlss_available()) s_dlss.ok = 0;
         return false;
+    }
+    if (s_post.post_trace) {
+        static unsigned evaluated_modes;
+        const unsigned mode = 1u << (unsigned)s_post.aa;
+        if (!(evaluated_modes & mode)) {
+            evaluated_modes |= mode;
+            fprintf(stderr, "[DLSS] evaluated successfully: aa %d %ux%u -> %ux%u\n", s_post.aa, cs->hw, cs->hh, out_w, out_h);
+        }
     }
     kg_cache_invalidate();
     if (s_dlss.big) {
