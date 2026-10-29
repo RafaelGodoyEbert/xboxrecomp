@@ -13,6 +13,7 @@ int pc_subtitle_page(const uint16_t *text, uint64_t elapsed, unsigned duration,
 void pc_speech_subtitle_start(uint32_t owner, unsigned level, unsigned sector,
                               unsigned sectors, unsigned rate);
 void pc_speech_subtitle_stop(uint32_t owner);
+int pc_subtitles_enabled(void);
 int pc_speech_subtitle(uint16_t *out, unsigned capacity, int paused);
 #ifdef PC_SPEECH_SUBTITLE_TEST
 void pc_speech_subtitle_test_time(uint64_t now);
